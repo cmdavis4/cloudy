@@ -1,0 +1,23 @@
+name: common
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - numpy
+  - pandas
+  - xarray
+  - matplotlib
+  - scipy
+  - tqdm
+  - jinja2
+  - pathlib
+  - pint
+  - pint-xarray
+  - metpy
+  - ipywidgets
+  - jupyter
+  - ipython
+  - scikit-image
+  - meshio
+  - pip

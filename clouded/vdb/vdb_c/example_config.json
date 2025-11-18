@@ -1,0 +1,63 @@
+{
+  "converter_settings": {
+    "default_threshold": 1e-6,
+    "default_grid_spacing": 500.0,
+    "verbose": false
+  },
+  "variable_mappings": {
+    "RCP": "liquid_water_content",
+    "RRP": "rain_water_content", 
+    "RIP": "ice_content",
+    "RSP": "snow_content",
+    "RAP": "aggregates_content",
+    "RGP": "graupel_content",
+    "RHP": "hail_content",
+    "THETA": "potential_temperature",
+    "UP": "velocity_u",
+    "VP": "velocity_v", 
+    "WP": "velocity_w"
+  },
+  "tracer_mappings": {
+    "note": "Tracers TRACERP001 through TRACERP042 are automatically mapped to tracer_1 through tracer_42"
+  },
+  "preset_configurations": {
+    "cloud_visualization": {
+      "variables": ["RCP", "RRP", "RIP"],
+      "threshold": 1e-5,
+      "description": "Basic cloud hydrometeors for visualization"
+    },
+    "boundary_layer_tracers": {
+      "variables": ["TRACERP007", "TRACERP008", "TRACERP009", "TRACERP010", "TRACERP011", "TRACERP012", "TRACERP013"],
+      "threshold": 1e-7,
+      "description": "Fixed-source tracers from boundary layer heights 0-3000m"
+    },
+    "rain_tracers": {
+      "variables": ["TRACERP001", "TRACERP002", "TRACERP003", "TRACERP004", "TRACERP005"],
+      "threshold": 1e-8,
+      "description": "Rain-sourced tracers at different thresholds"
+    },
+    "full_dynamics": {
+      "variables": ["RCP", "THETA", "UP", "VP", "WP"],
+      "threshold": 1e-6,
+      "description": "Cloud content plus velocity and temperature fields"
+    },
+    "storm_comparison": {
+      "variables": ["RCP", "TRACERP001", "TRACERP007", "THETA"],
+      "threshold": 5e-6,
+      "description": "Key variables for comparing storm types (IC, SL, SC)"
+    }
+  },
+  "dimension_mappings": {
+    "spatial_dimensions": {
+      "x_names": ["x", "xi", "lon", "longitude"],
+      "y_names": ["y", "yi", "lat", "latitude"],
+      "z_names": ["z", "zi", "level", "height"],
+      "time_names": ["time", "t", "Time"]
+    }
+  },
+  "optimization_settings": {
+    "chunk_size_mb": 512,
+    "enable_compression": true,
+    "parallel_processing": true
+  }
+}

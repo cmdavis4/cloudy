@@ -1,0 +1,5 @@
+# Data files are now included via package-data in pyproject.toml
+# since they're inside the common/ package directory
+include run_trajectories_template.jl
+include README.md
+include LICENSE

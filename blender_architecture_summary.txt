@@ -1,0 +1,449 @@
+================================================================================
+BLENDER MODULE ARCHITECTURE - QUICK REFERENCE GUIDE
+================================================================================
+
+FILE LOCATIONS & KEY FUNCTIONS
+================================================================================
+
+blender_run.py (MAIN ENTRY POINT)
+  - run_atmospheric_animation() - Lines 33-292
+    Main orchestration function for entire pipeline
+    
+blender_animation.py (ANIMATION CALLBACKS)
+  - register_frame_change_handlers() - Lines 20-38
+  - update_for_new_frame() - Lines 127-228
+  - animate_objects_visibility() - Lines 230-259
+  - _animate_object_visibility_helper() - Lines 67-87
+  - set_f_curve_interpolation() - Lines 40-65
+  - calculate_frames_per_timestep() - Lines 101-125
+
+blender_import.py (DATA LOADING)
+  - import_data_for_time() - Lines 152-229 (MAIN import function)
+  - import_single_data_file() - Lines 93-150
+  - get_data_filepaths() - Lines 23-27
+  - load_wind_data() - Lines 232-289
+
+blender_core.py (SCENE MANIPULATION)
+  - reset_scene() - Lines 63-89
+  - setup_object() - Lines 300-348
+  - update_object_geometry() - Lines 350-407
+  - get_object_by_name() - Lines 92-116
+  - create_collection() - Lines 231-253
+
+blender_config.py (CONFIGURATION)
+  - DEFAULT_BLENDER_CONFIG - Lines 3-14
+
+blender_camera.py (CAMERA)
+  - setup_camera() - Lines 7-36
+
+blender_render.py (RENDER SETTINGS)
+  - setup_render_settings() - Lines 7-115
+
+__init__.py (PUBLIC API)
+  - Re-exports all public functions for backwards compatibility
+
+
+CORE CONCEPTS
+================================================================================
+
+1. CALLBACK-BASED ANIMATION
+   - Persistent callback registered on frame change events
+   - Executes on every frame during playback/render
+   - Loads mesh data for each frame on-demand
+   - Two handler types: frame_change_post and render_pre
+
+2. FRAME MAPPING
+   - Blender frames (1-based) mapped to simulation times
+   - Example: Frames 1-2 both show simulation time T0
+   - Handled via frame_to_time_mapping list (0-based indices)
+
+3. TIME-BASED FILE NAMING
+   - Files named: dt-YYYYMMDDHHMMSS_category-varname.suffix
+   - Allows files to be discovered by simulation time
+   - Multiple files per timestep (different variables/categories)
+
+4. OBJECT METADATA
+   - Custom properties attached to Blender objects
+   - Store: data_file_suffix, category, varname
+   - Used to organize and update objects
+
+5. SCENE HIERARCHY
+   - Data collection contains subcollections by file type
+   - Objects organized as: plys/, vdbs/, objs/, vtps/
+   - Permanent objects updated per frame with new geometry
+
+6. CONFIGURATION MERGING
+   - User config merged with DEFAULT_BLENDER_CONFIG
+   - User values override defaults
+   - All configuration accessed via config dict
+
+
+EXECUTION FLOW SUMMARY
+================================================================================
+
+1. INITIALIZATION
+   run_atmospheric_animation() is called
+   ↓
+   - Reset scene to clean state
+   - Parse and merge configuration
+   - Scan data directory for files
+   - Extract unique simulation times
+   - Create frame_to_time_mapping
+   - Setup scene hierarchy and collections
+   - Define callback_function with captured variables
+   - Register callback via register_frame_change_handlers()
+   - Set frame to 1 (triggers initial callback!)
+   - Create grass field (optional)
+   - Optionally start rendering
+
+2. PER-FRAME CALLBACK (triggered by Blender on each frame)
+   callback_function(scene, depsgraph) is called
+   ↓
+   - Get current_frame from scene.frame_current
+   - Look up simulation_time from frame_to_time_mapping
+   - Call update_for_new_frame()
+   ↓
+   - Format filename pattern for this time
+   - Scan directory for matching files
+   - For each file:
+     - Import via import_single_data_file()
+     - Get or create permanent object
+     - Update geometry or setup object
+     - Delete temporary import
+   - Update date_text with current time
+
+
+CRITICAL VARIABLES (CAPTURED IN CALLBACK CLOSURE)
+================================================================================
+
+data_dir
+  Type: Path
+  Usage: Root directory containing timestamped mesh files
+  Location: Captured from run_atmospheric_animation() arg
+
+frame_to_time_mapping
+  Type: List[datetime.datetime]
+  Usage: Maps frame number (index) to simulation time
+  Length: len(animation_times) * frames_per_timestep_int
+  Location: Created in run_atmospheric_animation() lines 220-226
+
+kwargs_data
+  Type: Dict[str, Dict[str, Any]]
+  Usage: Per-category object configuration (scale, location, material, etc.)
+  Location: Passed to run_atmospheric_animation()
+
+global_scale
+  Type: Tuple[float, float, float]
+  Usage: Scaling applied to imported meshes
+  Location: Parameter to run_atmospheric_animation()
+
+
+CONFIGURATION FLAGS
+================================================================================
+
+In run_atmospheric_animation() signature:
+
+use_grass (bool, default=True)
+  - Line 267: if use_grass: create_grass_field()
+
+simulation_minutes_per_second (float, default=5)
+  - Used to calculate animation timing
+
+fps (int, default=24)
+  - Line 177: bpy.context.scene.render.fps = fps
+
+render (bool, default=False)
+  - Line 291: if render: bpy.ops.render.render(animation=True)
+
+assets_libraries (list[str], default=[])
+  - Lines 131-132: Load asset libraries
+
+limit (int|None, default=None)
+  - Line 163: Limit animation_times to first N timesteps
+
+use_time_stretching (bool, default=False)
+  - Lines 194-218: Enable time stretching mode
+
+output_format (str, default="PNG")
+  - Lines 100-103: Set render output format (PNG or FFMPEG)
+
+In config dict (merged with defaults):
+
+render_engine (str, default="BLENDER_EEVEE_NEXT")
+render_samples (int, default=128)
+resolution_x (int, default=1920)
+resolution_y (int, default=1080)
+grass_field_size (float, default=150)
+grass_density (int, default=1500)
+sun_energy (float, default=4)
+background_color (tuple, default=(0.02, 0.05, 0.2, 1.0))
+background_strength (float, default=0.4)
+
+
+HANDLER REGISTRATION DETAILS
+================================================================================
+
+Function: register_frame_change_handlers() (blender_animation.py:20-38)
+
+1. Clears ALL existing handlers:
+   - bpy.app.handlers.frame_change_pre.clear()
+   - bpy.app.handlers.frame_change_post.clear()
+   - bpy.app.handlers.render_pre.clear()
+   - bpy.app.handlers.render_post.clear()
+   - bpy.app.handlers.render_init.clear()
+
+2. Registers callback on TWO handlers:
+   - bpy.app.handlers.frame_change_post.append(callback)
+     (Triggers after frame changes in viewport)
+   - bpy.app.handlers.render_pre.append(callback)
+     (Triggers before rendering each frame)
+
+3. Callback must have @bpy.app.handlers.persistent decorator
+   - Prevents garbage collection of callback
+   - Callback signature: callback(scene, depsgraph=None)
+
+
+DATA IMPORT PIPELINE
+================================================================================
+
+File Discovery:
+  get_data_filepaths(data_dir) returns list of all files with suffixes:
+  .ply, .vdb, .obj, .vtk, .vtp
+
+Time Extraction:
+  For each file:
+    - Parse filename with to_kv_pairs(filepath, parse_datetimes=True)
+    - Extract: dt (datetime), category (str), varname (str)
+  Extract unique times: sorted(list(set([...])))
+  Validate even spacing: raise_if_not_evenly_spaced_(animation_times)
+
+Per-Frame Import (in callback):
+  1. Convert current_frame to 0-based index
+  2. Look up simulation_time from frame_to_time_mapping
+  3. Format glob pattern: f"dt-{dt_to_str(simulation_time)}*"
+  4. Find all matching files via directory.glob(pattern)
+  5. Sort by file type (VTK first, to avoid corruption)
+
+Single File Import:
+  import_single_data_file(filepath)
+    - Call appropriate importer based on file suffix
+    - Detect newly added objects in scene
+    - If multiple objects: raise error
+    - Extract metadata (category, varname, suffix)
+    - Assign custom properties to object
+    - Return single BlenderObject
+
+Time-Specific Import:
+  import_data_for_time(data_dir, frame_time, kwargs_data, global_scale)
+    - For each matching file:
+      - Import it (creates temporary object)
+      - Check category is in kwargs_data
+      - Check varname is in category's varnames (if specified)
+      - Apply global scale to non-VDB objects
+    - Return dict: {object_name: BlenderObject}
+
+Permanent vs Temporary Objects:
+  Temporary:
+    - Created by import_single_data_file()
+    - Named with full timestamp: "dt-20230101000000_Rcondensate-var1"
+    - Used to extract geometry
+    
+  Permanent:
+    - Created once on first frame
+    - Named without timestamp: "Rcondensate-var1"
+    - Geometry updated via update_object_geometry() each frame
+    - Persists in scene throughout animation
+
+
+VISIBILITY KEYFRAME FUNCTIONS (ALREADY IN CODE)
+================================================================================
+
+Location: blender_animation.py:67-259
+
+These functions enable keyframe-based animation (potential alternative to callbacks):
+
+_animate_object_visibility_helper(objects, frame, visible)
+  - Sets hide_viewport and hide_render keyframes
+  - Useful for showing/hiding objects at specific frames
+
+animate_objects_visibility(objects, start_frame, end_frame)
+  - Creates keyframes for frame range
+  - Hide before start_frame
+  - Show from start_frame to end_frame
+  - Hide after end_frame
+
+This infrastructure is already in place for keyframe mode implementation!
+
+
+POTENTIAL KEYFRAME MODE ARCHITECTURE
+================================================================================
+
+Alternative approach (not yet implemented):
+
+1. Pre-load all data at startup:
+   for each simulation_time in animation_times:
+       objects = import_data_for_time(data_dir, time, ...)
+       # Objects stored with unique names
+
+2. Create visibility keyframes:
+   for i, simulation_time in enumerate(animation_times):
+       objects = [objects_for_time_i]
+       start_frame = i * frames_per_timestep_int + 1
+       end_frame = (i + 1) * frames_per_timestep_int
+       animate_objects_visibility(objects, start_frame, end_frame)
+
+3. Skip callback registration:
+   # No register_frame_change_handlers() call
+   # Blender's native keyframe system handles animation
+
+Benefits:
+  - Faster rendering (no per-frame I/O)
+  - Better preview capability
+  - Simpler Blender workflow
+
+Drawbacks:
+  - High memory usage (all meshes in memory)
+  - Cannot dynamically update data
+  - No callback flexibility
+
+
+TIMING AND FRAME CALCULATIONS
+================================================================================
+
+Time Steps:
+  animation_times = sorted list of unique datetime objects from files
+  Must be evenly spaced (raises error if not)
+  
+  Example: [2023-01-01 00:00, 2023-01-01 00:05, 2023-01-01 00:10]
+
+Frames Per Timestep:
+  Calculated based on:
+    - simulation_minutes_per_second (default 5)
+    - fps (frames per second, default 24)
+    - timestep duration (time between successive frames)
+  
+  Formula (lines 170-176):
+    fps = max(1, int((simulation_minutes_per_second * 60) / timestep_seconds))
+    frames_per_timestep = 1.0 (simplified in current implementation)
+
+Frame Mapping:
+  Each animation_time appears frames_per_timestep_int times in mapping
+  
+  Example:
+    animation_times = [T0, T1, T2]
+    frames_per_timestep_int = 2
+    frame_to_time_mapping = [T0, T0, T1, T1, T2, T2]
+    (Index 0 → T0, Index 1 → T0, Index 2 → T1, etc.)
+
+Blender Frame Numbers (1-based):
+  Frame 1 → Index 0 → T0
+  Frame 2 → Index 1 → T0
+  Frame 3 → Index 2 → T1
+  Frame 4 → Index 3 → T1
+  Frame 5 → Index 4 → T2
+  Frame 6 → Index 5 → T2
+
+Time Stretching (optional):
+  Lines 194-218: Alternative timing mode
+  Uses frame_map_old and frame_map_new parameters
+  Allows rendering fewer frames with time stretching
+
+
+KEY CODE PATTERNS
+================================================================================
+
+Pattern 1: Callback with Closure
+  @bpy.app.handlers.persistent
+  def callback_function(scene, depsgraph=None):
+      # Captures variables from enclosing scope
+      return update_for_new_frame(
+          data_directory=data_dir,  # Captured variable
+          frame_to_time_mapping=frame_to_time_mapping,  # Captured
+          ...
+      )
+  register_frame_change_handlers(callback_function)
+
+Pattern 2: Configuration Merging
+  if config:
+      passed_config = copy(config)
+      config = copy(DEFAULT_BLENDER_CONFIG)
+      config.update(passed_config)
+  else:
+      config = copy(DEFAULT_BLENDER_CONFIG)
+
+Pattern 3: Object Discovery
+  initial_objects = set(bpy.context.scene.objects)
+  # ... perform import ...
+  new_objects = [obj for obj in bpy.context.scene.objects 
+                 if obj not in initial_objects]
+
+Pattern 4: Permanent vs Temporary Object
+  try:
+      permanent_obj = get_object_by_name(permanent_obj_name)
+      # Object exists - update it
+      update_object_geometry(permanent_obj, temp_obj, depsgraph)
+  except ValueError:
+      # Object doesn't exist - create it
+      setup_object(temp_obj, kwargs_data[category])
+      temp_obj.name = permanent_obj_name
+
+Pattern 5: File Discovery
+  glob_pattern = rf"dt-{dt_to_str(frame_time)}*"
+  this_time_data_filepaths = sorted(data_directory.glob(glob_pattern))
+
+
+DEBUGGING TIPS
+================================================================================
+
+1. Check scene state:
+   print(bpy.context.scene.frame_current)
+   print(bpy.context.scene.frame_start)
+   print(bpy.context.scene.frame_end)
+
+2. Check loaded objects:
+   for obj in bpy.context.scene.objects:
+       print(obj.name, obj.get("category"), obj.get("varname"))
+
+3. Check handlers:
+   print(len(bpy.app.handlers.frame_change_post))
+   print(len(bpy.app.handlers.render_pre))
+
+4. Check file discovery:
+   from blender.blender_import import get_data_filepaths
+   files = get_data_filepaths(data_dir)
+   print(f"Found {len(files)} files")
+
+5. Debug callback timing:
+   Add print statements in update_for_new_frame()
+   Monitor console during playback/render
+
+
+NEXT STEPS FOR KEYFRAME MODE
+================================================================================
+
+1. Add animation_mode parameter to run_atmospheric_animation()
+   animation_mode: str = "callback"  # or "keyframe"
+
+2. Create new function: run_atmospheric_animation_keyframe_mode()
+   - Similar structure but different initialization
+   - Import all data at startup instead of per-frame
+   - Create visibility keyframes instead of registering callback
+   - Use existing animate_objects_visibility() function
+
+3. Create mapping from simulation times to frame ranges:
+   def get_frame_range_for_time(time_index, frames_per_timestep):
+       start = time_index * frames_per_timestep + 1
+       end = (time_index + 1) * frames_per_timestep
+       return (start, end)
+
+4. Main loop for keyframe mode:
+   for i, simulation_time in enumerate(animation_times):
+       objects = import_data_for_time(...)
+       start_frame, end_frame = get_frame_range_for_time(i, frames_per_timestep)
+       animate_objects_visibility(objects, start_frame, end_frame)
+
+5. Update public API in __init__.py if needed
+
+6. Add tests for both animation modes
+
+================================================================================

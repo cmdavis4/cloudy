@@ -1,0 +1,11 @@
+.idea
+__pycache__
+.ipynb_checkpoints
+CLAUDE.md
+temp_*
+_test*
+.DS_Store
+pvplotting/experimental.py
+.claude
+build
+dist

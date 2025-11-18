@@ -1,0 +1,421 @@
+================================================================================
+BLENDER MODULE WORKFLOW DIAGRAMS
+================================================================================
+
+DIAGRAM 1: HIGH-LEVEL INITIALIZATION FLOW
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      run_atmospheric_animation()                            │
+│                       (blender_run.py:33-292)                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 1. RESET SCENE             │
+                        │ - Clear handlers           │
+                        │ - Delete objects           │
+                        │ - Clear collections        │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 2. CONFIG SETUP            │
+                        │ - Merge with defaults      │
+                        │ - Extract parameters       │
+                        │ - Validate output format   │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 3. CAMERA & RENDER SETUP   │
+                        │ - Create camera            │
+                        │ - setup_render_settings()  │
+                        │ - Set engine               │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 4. TIME DATA ANALYSIS      │
+                        │ - get_data_filepaths()     │
+                        │ - Extract unique times     │
+                        │ - Validate spacing         │
+                        │ - Calculate fps            │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 5. FRAME MAPPING           │
+                        │ - Create frame_to_time_    │
+                        │   mapping[] list           │
+                        │ - Length = times * frames/ │
+                        │   timestep                 │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 6. SCENE HIERARCHY         │
+                        │ - create_collection()      │
+                        │ - Add plys/vdbs/objs/etc   │
+                        │ - Add date_text object     │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 7. CALLBACK DEFINITION     │
+                        │ - Define callback_func()   │
+                        │ - With @persistent decor   │
+                        │ - Capture closure vars     │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 8. REGISTER CALLBACKS      │
+                        │ - register_frame_change_   │
+                        │   handlers(callback)       │
+                        │ - Sets frame_change_post   │
+                        │ - Sets render_pre          │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 9. INITIALIZE SCENE        │
+                        │ - frame_set(1)             │
+                        │ - Triggers callback!       │
+                        │ - Creates grass (optional) │
+                        │ - Set background           │
+                        └────────────────────────────┘
+                                     ↓
+                        ┌────────────────────────────┐
+                        │ 10. RENDER (optional)      │
+                        │ - bpy.ops.render.render()  │
+                        │ - if render=True           │
+                        └────────────────────────────┘
+
+
+DIAGRAM 2: FRAME CHANGE CALLBACK FLOW (EXECUTES PER FRAME)
+================================================================================
+
+User triggers frame change (play, timeline scrub, or render)
+                                     ↓
+              ┌──────────────────────────────────────────┐
+              │  Blender Engine: Frame Changed to N      │
+              │  (e.g., from frame 1 to frame 2)         │
+              └──────────────────────────────────────────┘
+                                     ↓
+              ┌──────────────────────────────────────────┐
+              │  Handler Triggers (2 handlers):          │
+              │  1. frame_change_post                    │
+              │  2. render_pre                           │
+              └──────────────────────────────────────────┘
+                                     ↓
+              ┌──────────────────────────────────────────┐
+              │  @persistent callback_function(          │
+              │    scene,                                │
+              │    depsgraph=None                        │
+              │  )                                       │
+              │                                          │
+              │  [Captures closure variables:]           │
+              │  - data_dir                              │
+              │  - frame_to_time_mapping                 │
+              │  - kwargs_data                           │
+              │  - global_scale                          │
+              └──────────────────────────────────────────┘
+                                     ↓
+              ┌──────────────────────────────────────────┐
+              │  Call: update_for_new_frame(...)         │
+              │  (blender_animation.py:127-228)          │
+              └──────────────────────────────────────────┘
+                                     ↓
+         ┌────────────────────────────────────────────────────┐
+         │ Inside update_for_new_frame():                     │
+         │                                                    │
+         │ 1. Get current_frame = scene.frame_current         │
+         │ 2. Convert to 0-based: frame_index = N - 1         │
+         │ 3. Look up time: current_time =                    │
+         │    frame_to_time_mapping[frame_index]              │
+         │ 4. Update date_text.data.body with formatted time  │
+         │ 5. Call: import_data_for_time(                     │
+         │      data_dir, current_time, kwargs_data, scale)   │
+         └────────────────────────────────────────────────────┘
+                                     ↓
+         ┌────────────────────────────────────────────────────┐
+         │ import_data_for_time():                            │
+         │ (blender_import.py:152-229)                        │
+         │                                                    │
+         │ For each file matching pattern:                    │
+         │ f"dt-{dt_to_str(current_time)}*":                  │
+         └────────────────────────────────────────────────────┘
+                                     ↓
+         ┌────────────────────────────────────────────────────┐
+         │ For each matching file:                            │
+         │                                                    │
+         │ A. import_single_data_file(filepath)               │
+         │    - Calls appropriate import function             │
+         │    - Creates TEMPORARY object                      │
+         │    - Extracts metadata (category, varname)         │
+         │    - Returns BlenderObject                         │
+         │                                                    │
+         │ B. Parse metadata:                                 │
+         │    - category = "Rcondensate"                      │
+         │    - varname = "var1"                              │
+         │    - permanent_obj_name = "Rcondensate-var1"       │
+         │                                                    │
+         │ C. Try: get_object_by_name(permanent_obj_name)     │
+         │                                                    │
+         │ D. If found (object already exists):               │
+         │    - update_object_geometry(                       │
+         │        permanent_obj, temp_obj, depsgraph)         │
+         │    - Delete temp_obj                               │
+         │                                                    │
+         │ E. If not found (first time for this data):        │
+         │    - Setup the temporary as permanent:             │
+         │    - setup_object(temp_obj, kwargs_data[cat])      │
+         │    - Rename: temp_obj.name = permanent_obj_name    │
+         │    - (temp_obj becomes the permanent object)       │
+         │                                                    │
+         │ F. Store in return dict:                           │
+         │    {permanent_obj_name: object}                    │
+         └────────────────────────────────────────────────────┘
+                                     ↓
+         ┌────────────────────────────────────────────────────┐
+         │ Callback Returns                                   │
+         │ Frame now shows correct geometry for time N        │
+         └────────────────────────────────────────────────────┘
+                                     ↓
+         ┌────────────────────────────────────────────────────┐
+         │ Viewport Updates OR Frame Renders                  │
+         │ User sees the data for this simulation time        │
+         └────────────────────────────────────────────────────┘
+
+
+DIAGRAM 3: DATA ORGANIZATION IN SCENE HIERARCHY
+================================================================================
+
+Scene
+│
+├── Scene Collection (master)
+│   │
+│   ├── data (Collection)
+│   │   │
+│   │   ├── plys/ (Collection)
+│   │   │   ├── Rcondensate-var1 (Object - PLY mesh)
+│   │   │   │   └── Geometry: Updated each frame
+│   │   │   │
+│   │   │   ├── Rcondensate-var2 (Object - PLY mesh)
+│   │   │   │   └── Geometry: Updated each frame
+│   │   │   │
+│   │   │   └── thetadeficit-var1 (Object - PLY mesh)
+│   │   │       └── Geometry: Updated each frame
+│   │   │
+│   │   ├── vdbs/ (Collection)
+│   │   │   ├── wind-data (Object - VDB volume)
+│   │   │   │   └── Data: Updated each frame
+│   │   │   │
+│   │   │   └── clouds-3d (Object - VDB volume)
+│   │   │
+│   │   ├── objs/ (Collection)
+│   │   │   └── (empty for now)
+│   │   │
+│   │   └── vtps/ (Collection)
+│   │       └── (empty for now)
+│   │
+│   ├── date_text (Text Object)
+│   │   └── Body: Updates with current simulation time
+│   │
+│   ├── grass_plane (Object - with geometry nodes)
+│   │   └── Deforms based on wind data
+│   │
+│   ├── grass_plane_nohair (Object)
+│   │
+│   └── Camera
+│       └── Active scene camera
+
+Object Metadata (Custom Properties on each object):
+    obj["data_file_suffix"] = ".ply"  (or .vdb, .obj, .vtp)
+    obj["category"] = "Rcondensate"
+    obj["varname"] = "var1"
+    obj.name = "Rcondensate-var1"
+    obj.material_slots = [assigned materials]
+
+
+DIAGRAM 4: frame_to_time_mapping STRUCTURE
+================================================================================
+
+Scenario: 3 simulation timesteps, 2 frames per timestep
+
+animation_times = [
+    datetime(2023, 1, 1, 0, 0, 0),   # Time 0
+    datetime(2023, 1, 1, 0, 5, 0),   # Time 1
+    datetime(2023, 1, 1, 0, 10, 0),  # Time 2
+]
+
+frames_per_timestep_int = 2
+
+frame_to_time_mapping = [
+    # Index 0, Blender Frame 1
+    datetime(2023, 1, 1, 0, 0, 0),
+    # Index 1, Blender Frame 2
+    datetime(2023, 1, 1, 0, 0, 0),
+    # Index 2, Blender Frame 3
+    datetime(2023, 1, 1, 0, 5, 0),
+    # Index 3, Blender Frame 4
+    datetime(2023, 1, 1, 0, 5, 0),
+    # Index 4, Blender Frame 5
+    datetime(2023, 1, 1, 0, 10, 0),
+    # Index 5, Blender Frame 6
+    datetime(2023, 1, 1, 0, 10, 0),
+]
+
+Usage in callback:
+    current_frame = 4  (from scene.frame_current)
+    frame_index = 4 - 1 = 3  (convert to 0-based)
+    current_time = frame_to_time_mapping[3]
+    # current_time = datetime(2023, 1, 1, 0, 5, 0)
+    
+    # Now look for files matching:
+    # pattern = "dt-20230101000500*"
+    # This matches files at the 5-minute mark
+
+
+DIAGRAM 5: CONFIGURATION FLOW
+================================================================================
+
+User calls:
+    run_atmospheric_animation(
+        data_dir="/path/to/data",
+        output_dir="/path/to/output",
+        kwargs_data={...},
+        config={"resolution_x": 2560, "resolution_y": 1440},  # User override
+        use_grass=True,
+        simulation_minutes_per_second=5,
+        fps=24,
+        ...
+    )
+                                     ↓
+        ┌────────────────────────────────────────┐
+        │ Config Merging (lines 105-111):        │
+        │                                        │
+        │ 1. passed_config = copy(config)        │
+        │    = {"resolution_x": 2560, ...}       │
+        │                                        │
+        │ 2. config = copy(DEFAULT_CONFIG)       │
+        │    = Full default dict                 │
+        │                                        │
+        │ 3. config.update(passed_config)        │
+        │    = Overwrite defaults with user      │
+        │                                        │
+        │ Result: resolution_x = 2560 (override) │
+        │         Other values = defaults        │
+        └────────────────────────────────────────┘
+                                     ↓
+        ┌────────────────────────────────────────┐
+        │ Configuration Used At:                 │
+        │                                        │
+        │ Line 137:                              │
+        │   render.engine = config["render_"]    │
+        │   = "BLENDER_EEVEE_NEXT"               │
+        │                                        │
+        │ Line 142:                              │
+        │   resolution = config.get("resolution_")
+        │   = (2560, 1440)                       │
+        │                                        │
+        │ Line 143:                              │
+        │   quality = config.get("quality")      │
+        │   = "MEDIUM"                           │
+        │                                        │
+        │ Line 177:                              │
+        │   fps = config.get("render_fps", 24)   │
+        │   = 24                                 │
+        │                                        │
+        │ Line 267:                              │
+        │   if use_grass:                        │
+        │     create_grass_field()                │
+        │                                        │
+        │ Lines 194-218:                         │
+        │   if use_time_stretching:              │
+        │     Set frame_map_old/new               │
+        │                                        │
+        │ Lines 100-103:                         │
+        │   render.image_settings.file_format =  │
+        │   output_format                        │
+        └────────────────────────────────────────┘
+
+
+DIAGRAM 6: COMPARISON - CALLBACK MODE VS KEYFRAME MODE
+================================================================================
+
+CALLBACK MODE (Current Implementation):
+┌──────────────────────────────────────────────────────────────┐
+│ Setup Phase:                                                 │
+│ - Create empty scene with cameras/collections                │
+│ - Register frame change callback                             │
+│ - Set frame to 1 (no data loaded yet)                        │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ Playback/Render Phase (PER FRAME):                           │
+│                                                              │
+│ Frame 1: Load data for time T0                               │
+│          (File I/O + import)                                 │
+│          Render/display                                      │
+│                                                              │
+│ Frame 2: Load data for time T0 (again!)                      │
+│          (File I/O + import - REDUNDANT)                     │
+│          Render/display                                      │
+│                                                              │
+│ Frame 3: Load data for time T1                               │
+│          (File I/O + import)                                 │
+│          Render/display                                      │
+│                                                              │
+│ Frame 4: Load data for time T1 (again!)                      │
+│          (File I/O + import - REDUNDANT)                     │
+│          Render/display                                      │
+└──────────────────────────────────────────────────────────────┘
+
+Pros:  - Memory efficient (one copy of each mesh)
+       - Flexible (can respond to timeline changes)
+       
+Cons:  - Slow (redundant I/O on every frame)
+       - Hard to preview
+       - Callback overhead
+
+
+KEYFRAME MODE (Proposed Alternative):
+┌──────────────────────────────────────────────────────────────┐
+│ Setup Phase:                                                 │
+│ - Create scene with cameras/collections                      │
+│ - Import ALL data at startup:                                │
+│   - T0: Import all meshes                                    │
+│   - T1: Import all meshes                                    │
+│   - T2: Import all meshes                                    │
+│   - (Each meshes stored as separate object)                  │
+│                                                              │
+│ - Set visibility keyframes:                                  │
+│   - Frames 1-2: Show T0 meshes, hide T1/T2                   │
+│   - Frames 3-4: Hide T0, show T1, hide T2                    │
+│   - Frames 5-6: Hide T0/T1, show T2                          │
+│                                                              │
+│ - NO callback registration                                   │
+└──────────────────────────────────────────────────────────────┘
+                            ↓
+┌──────────────────────────────────────────────────────────────┐
+│ Playback/Render Phase (NO CALLBACKS):                        │
+│                                                              │
+│ Frame 1: Keyframes control visibility                        │
+│          (T0 meshes visible, T1/T2 hidden)                   │
+│          Render/display (FAST - no I/O)                      │
+│                                                              │
+│ Frame 2: Keyframes control visibility                        │
+│          (T0 meshes visible, T1/T2 hidden)                   │
+│          Render/display (FAST - no I/O)                      │
+│                                                              │
+│ Frame 3: Keyframes control visibility                        │
+│          (T0 hidden, T1 meshes visible, T2 hidden)           │
+│          Render/display (FAST - no I/O)                      │
+│                                                              │
+│ Blender's native animation system handles visibility         │
+└──────────────────────────────────────────────────────────────┘
+
+Pros:  - Fast rendering (no I/O per frame)
+       - Easy to preview (native Blender animation)
+       - Better debuggability
+       
+Cons:  - Higher memory usage (all meshes in memory)
+       - Cannot dynamically load new data
+
+
+================================================================================
+END OF DIAGRAMS
+================================================================================
